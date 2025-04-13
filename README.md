@@ -1,4 +1,4 @@
-# STOFS-utils: Storm Surge and Tide Operational Forecast System Utilities
+# STOFS_utils: Storm Surge and Tide Operational Forecast System Utilities
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
@@ -20,7 +20,7 @@ A Python package providing utilities for working with STOFS3D (Storm Surge and T
 ```bash
 # Clone the repository
 git clone https://github.com/mansurjisan/stofs_utils.git
-cd stofs-utils
+cd stofs_utils
 
 # Install the package
 pip install -e .
