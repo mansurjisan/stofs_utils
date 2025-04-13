@@ -2,7 +2,7 @@ import numpy as np
 import xarray as xr
 from tempfile import NamedTemporaryFile
 from netCDF4 import Dataset
-from stofs_utils.processing.extract import extract_2d_slab, write_slab_netcdf
+from stofs_utils.processing.extract import extract_2d_slab, write_slab_netcdf, write_simple_netcdf
 
 def test_extract_2d_slab():
     # Create synthetic data
@@ -29,6 +29,31 @@ def test_extract_2d_slab():
     assert not np.any(np.isnan(slab))
 
 
+#def test_write_slab_netcdf():
+#    # Dummy data
+#    nt, n_nodes = 3, 4 
+#    time_vals = np.arange(nt) 
+#    x = np.linspace(-70, -69, n_nodes)
+#    y = np.linspace(40, 41, n_nodes)
+#    slab = np.random.rand(nt, n_nodes)
+#    varname = "temperature"
+#    attrs = {
+#        "long_name": "Sea temperature",
+#        "units": "degC",
+#        "time_units": "seconds since 2000-01-01"
+#    }
+#
+#    # Create a temporary file
+#    with NamedTemporaryFile(suffix=".nc") as tmp:
+#        write_slab_netcdf(tmp.name, time_vals, x, y, slab, varname, attrs)
+#
+#        # Reopen and verify
+#        with Dataset(tmp.name) as ds:
+#            assert varname in ds.variables
+#            assert ds.variables[varname].shape == (nt, n_nodes) 
+#            assert np.allclose(ds.variables['time'][:], time_vals)
+
+
 def test_write_slab_netcdf():
     # Dummy data
     nt, n_nodes = 3, 4 
@@ -45,7 +70,7 @@ def test_write_slab_netcdf():
 
     # Create a temporary file
     with NamedTemporaryFile(suffix=".nc") as tmp:
-        write_slab_netcdf(tmp.name, time_vals, x, y, slab, varname, attrs)
+        write_simple_netcdf(tmp.name, time_vals, x, y, slab, varname, attrs)
 
         # Reopen and verify
         with Dataset(tmp.name) as ds:

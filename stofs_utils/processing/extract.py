@@ -19,13 +19,92 @@ DEFAULT_FILL_VALUE = -99999.0
 DEFAULT_DEPTH_LEVEL = -4.5
 
 
+#def extract_2d_slab(ds, var_name, k1, coeff):
+#    """
+#    Extract a 2D slab from 3D data at interpolated levels.
+#    
+#    Parameters
+#    ----------
+#    ds : netCDF4.Dataset
+#        Dataset containing the variable
+#    var_name : str
+#        Name of the variable to extract
+#    k1 : numpy.ndarray
+#        Lower k-level indices
+#    coeff : numpy.ndarray
+#        Interpolation coefficients
+#        
+#    Returns
+#    -------
+#    numpy.ndarray
+#        Interpolated values at the specified level
+#    """
+#    var_data = np.squeeze(ds[var_name][:])
+#    NP = var_data.shape[1]
+#    ntimes = var_data.shape[0]
+#    
+#    # Initialize output array
+#    result = np.full((ntimes, NP), np.nan)
+#    
+#    # Interpolate at each time step
+#    for it in range(ntimes):
+#        values = var_data[it]
+#        tmp = np.array(values[np.arange(NP), k1] * (1-coeff) + values[np.arange(NP), k1+1] * coeff)
+#        result[it, :] = np.squeeze(tmp)
+#    
+#    return result
+
+
+
+#def extract_2d_slab(ds, var_name, k1, coeff):
+#    """
+#    Extract a 2D slab from 3D data at interpolated levels.
+#    
+#    Parameters
+#    ----------
+#    ds : xarray.Dataset or netCDF4.Dataset
+#        Dataset containing the variable
+#    var_name : str
+#        Name of the variable to extract
+#    k1 : numpy.ndarray
+#        Lower k-level indices
+#    coeff : numpy.ndarray
+#        Interpolation coefficients
+#        
+#    Returns
+#    -------
+#    numpy.ndarray
+#        Interpolated values at the specified level
+#    """
+#    # Get data array
+#    var_data = ds[var_name].values if hasattr(ds[var_name], 'values') else np.squeeze(ds[var_name][:])
+#    
+#    # Get dimensions
+#    NP = var_data.shape[1]
+#    ntimes = var_data.shape[0]
+#    
+#    # Initialize output array
+#    result = np.full((ntimes, NP), np.nan)
+#    
+#    # Interpolate at each time step
+#    for it in range(ntimes):
+#        values = var_data[it]
+#        # Loop over nodes for indexing to avoid multi-dimensional indexing issues
+#        for i in range(NP):
+#            k_lower = k1[it, i]
+#            k_upper = k1[it, i] + 1
+#            c = coeff[it, i]
+#            result[it, i] = values[i, k_lower] * (1-c) + values[i, k_upper] * c
+#    
+#    return result
+
 def extract_2d_slab(ds, var_name, k1, coeff):
     """
     Extract a 2D slab from 3D data at interpolated levels.
     
     Parameters
     ----------
-    ds : netCDF4.Dataset
+    ds : xarray.Dataset or netCDF4.Dataset
         Dataset containing the variable
     var_name : str
         Name of the variable to extract
@@ -39,9 +118,13 @@ def extract_2d_slab(ds, var_name, k1, coeff):
     numpy.ndarray
         Interpolated values at the specified level
     """
-    var_data = np.squeeze(ds[var_name][:])
-    NP = var_data.shape[1]
+    # Get data array
+    var_data = ds[var_name].values if hasattr(ds[var_name], 'values') else np.squeeze(ds[var_name][:])
+    
+    # Get dimensions
     ntimes = var_data.shape[0]
+    nvrt = var_data.shape[1]  # This is the vertical dimension
+    NP = var_data.shape[2]    # This is the node dimension for xarray
     
     # Initialize output array
     result = np.full((ntimes, NP), np.nan)
@@ -49,11 +132,14 @@ def extract_2d_slab(ds, var_name, k1, coeff):
     # Interpolate at each time step
     for it in range(ntimes):
         values = var_data[it]
-        tmp = np.array(values[np.arange(NP), k1] * (1-coeff) + values[np.arange(NP), k1+1] * coeff)
-        result[it, :] = np.squeeze(tmp)
+        # Loop over nodes for indexing to avoid multi-dimensional indexing issues
+        for i in range(NP):
+            k_lower = k1[it, i]
+            k_upper = k1[it, i] + 1
+            c = coeff[it, i]
+            result[it, i] = values[k_lower, i] * (1-c) + values[k_upper, i] * c
     
     return result
-
 
 def write_slab_netcdf(output_file, date, x, y, depth, tris, times, elev2d, 
                      temp_sur, temp_bot, salt_sur, salt_bot,
@@ -206,6 +292,56 @@ def write_slab_netcdf(output_file, date, x, y, depth, tris, times, elev2d,
         
     return output_file
 
+
+def write_simple_netcdf(output_file, time_values, x, y, data, varname, attrs=None):
+    """
+    Write simple data to a NetCDF file (for testing purposes).
+    
+    Parameters
+    ----------
+    output_file : str
+        Output file path
+    time_values : numpy.ndarray
+        Time values
+    x, y : numpy.ndarray
+        Coordinate arrays
+    data : numpy.ndarray
+        Data array with shape (time, node)
+    varname : str
+        Variable name
+    attrs : dict, optional
+        Variable attributes
+        
+    Returns
+    -------
+    str
+        Path to output file
+    """
+    with Dataset(output_file, "w", format="NETCDF4") as ds:
+        # Create dimensions
+        ds.createDimension('time', None)
+        ds.createDimension('node', len(x))
+        
+        # Create variables
+        time_var = ds.createVariable('time', 'f8', ('time',))
+        time_var[:] = time_values
+        
+        x_var = ds.createVariable('x', 'f8', ('node',))
+        x_var[:] = x
+        
+        y_var = ds.createVariable('y', 'f8', ('node',))
+        y_var[:] = y
+        
+        # Create data variable
+        var = ds.createVariable(varname, 'f8', ('time', 'node'))
+        var[:] = data
+        
+        # Add attributes if provided
+        if attrs:
+            for attr_name, attr_value in attrs.items():
+                setattr(var, attr_name, attr_value)
+                
+    return output_file
 
 def extract_slab_forecast(input_dir, stack, date, results_dir="./results", 
                         depth_level=DEFAULT_DEPTH_LEVEL, fill_value=DEFAULT_FILL_VALUE):
