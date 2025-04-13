@@ -31,8 +31,8 @@ def test_extract_2d_slab():
 
 def test_write_slab_netcdf():
     # Dummy data
-    nt, n_nodes = 3, 4 # Use n_nodes instead of np
-    time_vals = np.arange(nt) # Use np (NumPy) correctly here
+    nt, n_nodes = 3, 4 
+    time_vals = np.arange(nt) 
     x = np.linspace(-70, -69, n_nodes)
     y = np.linspace(40, 41, n_nodes)
     slab = np.random.rand(nt, n_nodes)
@@ -45,7 +45,7 @@ def test_write_slab_netcdf():
 
     # Create a temporary file
     with NamedTemporaryFile(suffix=".nc") as tmp:
-        write_slab_netcdf(tmp.name, time, x, y, slab, varname, attrs)
+        write_slab_netcdf(tmp.name, time_vals, x, y, slab, varname, attrs)
 
         # Reopen and verify
         with Dataset(tmp.name) as ds:
