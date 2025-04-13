@@ -4,6 +4,7 @@ River source/sink generation module for STOFS3D using NWM data.
 """
 
 import os
+import argparse
 import numpy as np
 import pandas as pd
 import xarray as xr

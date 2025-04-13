@@ -6,10 +6,11 @@ particularly for visualizing water disturbance contours.
 """
 import os
 import time
+import copy
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from netCDF4 import Dataset, num2date
+from netCDF4 import Dataset
 from shapely.geometry import Polygon, MultiPolygon
 from shapely.validation import make_valid
 from geopandas import GeoDataFrame
@@ -18,9 +19,9 @@ import multiprocessing as mp
 from ..utils.helpers import split_quads, triangulation
 
 
-def contour_to_gdf(disturbance, levels, tri, cmap_name='jet', min_max_values=None):
+def contour_to_gdf(disturbance, levels, triangulation):
     """
-    Convert matplotlib contour data to GeoDataFrame.
+    Convert disturbance data to GeoDataFrame with contours.
     
     Parameters
     ----------
@@ -28,12 +29,8 @@ def contour_to_gdf(disturbance, levels, tri, cmap_name='jet', min_max_values=Non
         Disturbance values at nodes
     levels : list
         Contour levels
-    tri : matplotlib.tri.Triangulation
+    triangulation : matplotlib.tri.Triangulation
         Triangulation of the grid
-    cmap_name : str, optional
-        Matplotlib colormap name (default: 'jet')
-    min_max_values : tuple, optional
-        (min_value, max_value) for color mapping
         
     Returns
     -------
@@ -41,98 +38,76 @@ def contour_to_gdf(disturbance, levels, tri, cmap_name='jet', min_max_values=Non
         GeoDataFrame containing contours
     """
     # Set min/max values
-    if min_max_values is None:
-        MinVal = levels[0]
-        MaxVal = levels[-1]
-    else:
-        MinVal, MaxVal = min_max_values
-    
+    MinVal = levels[0]
+    MaxVal = levels[-1]
+
     # Create level ranges for labeling
     MinMax = [(disturbance.min(), levels[0])]
     for i in np.arange(len(levels)-1):
         MinMax.append((levels[i], levels[i+1]))
-    
-    # Create contours
+
     fig = plt.figure()
     ax = fig.add_subplot()
-    
-    my_cmap = plt.cm.get_cmap(cmap_name)
-    contour = ax.tricontourf(tri, disturbance, vmin=MinVal, vmax=MaxVal,
-                            levels=levels, cmap=my_cmap, extend='min')
-    
-    # Transform contour collections to polygons
+
+    my_cmap = plt.cm.jet
+    contour = ax.tricontourf(triangulation, disturbance, vmin=MinVal, vmax=MaxVal,
+        levels=levels, cmap=my_cmap, extend='min')
+
+    # Transform a `matplotlib.contour.QuadContourSet` to a GeoDataFrame
     polygons, colors = [], []
     data = []
-    
     for i, polygon in enumerate(contour.collections):
         mpoly = []
         for path in polygon.get_paths():
             try:
                 path.should_simplify = False
                 poly = path.to_polygons()
-                
-                # Each polygon should contain an exterior ring + maybe hole(s)
+                # Each polygon should contain an exterior ring + maybe hole(s):
                 exterior, holes = [], []
                 if len(poly) > 0 and len(poly[0]) > 3:
-                    # The first ring is the exterior
+                    # The first of the list is the exterior ring:
                     exterior = poly[0]
-                    # Other rings are holes
+                    # Other(s) are hole(s):
                     if len(poly) > 1:
                         holes = [h for h in poly[1:] if len(h) > 3]
-                
                 mpoly.append(make_valid(Polygon(exterior, holes)))
-            except Exception as e:
-                print(f'Warning: Geometry error when making polygon #{i}: {str(e)}')
-        
+            except:
+                print('Warning: Geometry error when making polygon #{}'.format(i))
+
         if len(mpoly) > 1:
             mpoly = MultiPolygon(mpoly)
             polygons.append(mpoly)
             colors.append(polygon.get_facecolor().tolist()[0])
-            data.append({
-                'id': i+1, 
-                'minWaterLevel': MinMax[i][0], 
-                'maxWaterLevel': MinMax[i][1],
-                'verticalDatum': 'XGEOID20B', 
-                'units': 'meters', 
-                'geometry': mpoly
-            })
+            data.append({'id': i+1, 'minWaterLevel': MinMax[i][0], 'maxWaterLevel': MinMax[i][1], 
+                    'verticalDatum': 'XGEOID20B', 'units': 'meters', 'geometry': mpoly})
         elif len(mpoly) == 1:
             polygons.append(mpoly[0])
             colors.append(polygon.get_facecolor().tolist()[0])
-            data.append({
-                'id': i+1, 
-                'minWaterLevel': MinMax[i][0], 
-                'maxWaterLevel': MinMax[i][1],
-                'verticalDatum': 'XGEOID20B', 
-                'units': 'meters', 
-                'geometry': mpoly[0]
-            })
-    
+            data.append({'id': i+1, 'minWaterLevel': MinMax[i][0], 'maxWaterLevel': MinMax[i][1], 
+                    'verticalDatum': 'XGEOID20B', 'units': 'meters', 'geometry': mpoly[0]})
     plt.close('all')
-    
-    # Create GeoDataFrame
+
     gdf = GeoDataFrame(data)
-    
-    # Create color values
+
+    # Get color in Hex
     colors_elev = []
-    my_cmap = plt.cm.get_cmap(cmap_name)
-    
+    my_cmap = plt.cm.jet
+
     for i in range(len(gdf)):
         color = my_cmap(i/len(gdf))
         colors_elev.append(mpl.colors.to_hex(color))
-    
+
     gdf['rgba'] = colors_elev
-    
-    # Set CRS
+
+    # Set crs
     gdf = gdf.set_crs(4326)
-    
+
     return gdf
 
-def get_disturbance(elevation, depth, levels, fill_value, out_filename, tri, 
-                   dry_node_threshold=1.e-6, min_disturbance_threshold=0.3,
-                   layer_name='disturbance', output_format='GPKG'):
+
+def get_disturbance(elevation, depth, levels, fill_value, out_filename, triangulation):
     """
-    Calculate water disturbance and save to GeoJSON file.
+    Calculate water disturbance and save to GeoJSON/GPKG file.
     
     Parameters
     ----------
@@ -146,65 +121,46 @@ def get_disturbance(elevation, depth, levels, fill_value, out_filename, tri,
         Fill value for dry nodes
     out_filename : str
         Output filename
-    tri : matplotlib.tri.Triangulation
+    triangulation : matplotlib.tri.Triangulation
         Triangulation of the grid
-    dry_node_threshold : float, optional
-        Threshold for identifying dry nodes (elevation + depth <= threshold)
-    min_disturbance_threshold : float, optional
-        Minimum disturbance value to include (default: 0.3m)
-    layer_name : str, optional
-        Name of the layer in the output file (default: 'disturbance')
-    output_format : str, optional
-        Output file format (default: 'GPKG', options: 'GPKG', 'GeoJSON', 'ESRI Shapefile')
     """
     # Calculate disturbance
-    disturbance = np.copy(elevation)
+    disturbance = copy.deepcopy(elevation)
     idxs_land_node = depth < 0
     disturbance[idxs_land_node] = np.maximum(0, elevation[idxs_land_node] + depth[idxs_land_node])
-    
+
     # Set mask on dry nodes
-    idxs_dry = np.where(elevation + depth <= dry_node_threshold)
+    idxs_dry = np.where(elevation + depth <= 1.e-6)
     disturbance[idxs_dry] = fill_value
-    
-    # Set mask on nodes with small max disturbance on land
-    idxs_small = disturbance < min_disturbance_threshold
+
+    # Set mask on nodes with small max disturbance (<0.3 m) on land
+    idxs_small = disturbance < 0.3
     idxs_mask_maxdist = idxs_small * idxs_land_node
     disturbance[idxs_mask_maxdist] = fill_value
-    
-    # [rest of function remains the same]
+
+    # Get mask for triangulation
+    imask = disturbance < -90000
+    mask = np.any(np.where(imask[triangulation.triangles], True, False), axis=1)
+    triangulation.set_mask(mask)
     
     # Convert to GeoDataFrame
-    gdf = contour_to_gdf(disturbance, levels, tri_copy)
+    gdf = contour_to_gdf(disturbance, levels, triangulation)
     
-    # Map format strings to driver names
-    format_drivers = {
-        'GPKG': 'GPKG',
-        'GeoJSON': 'GeoJSON',
-        'SHP': 'ESRI Shapefile',
-        'ESRI Shapefile': 'ESRI Shapefile'
-    }
-    
-    # Get appropriate driver
-    driver = format_drivers.get(output_format.upper(), 'GPKG')
-    
-    # Save to file
-    gdf.to_file(out_filename, driver=driver, layer=layer_name)
-    
-    return gdf
+    # Determine file format and layer name
+    if out_filename.endswith('.gpkg'):
+        gdf.to_file(out_filename, driver="GPKG", layer='disturbance')
+    else:
+        gdf.to_file(out_filename, driver="GeoJSON")
+
 
 def generate_disturbance_contours(
-    input_filename, 
-    output_dir=".", 
+    input_filename,
+    output_dir=".",
     output_prefix="stofs_3d_atl",
-    levels=None, 
+    levels=None,
     fill_value=-99999.0,
-    use_multiprocessing=True,
-    output_format='GPKG',
-    layer_name='disturbance',
-    dry_node_threshold=1.e-6,
-    min_disturbance_threshold=0.3
+    use_multiprocessing=True
 ):
-
     """
     Generate disturbance contours from SCHISM output.
     
@@ -239,7 +195,7 @@ def generate_disturbance_contours(
     if levels is None:
         levels = [round(i, 1) for i in np.arange(0.3, 2.1, 0.1)]
     
-    # Read netcdf dataset
+    # Reading netcdf dataset
     ds = Dataset(input_filename)
     
     # Get coordinates/bathymetry
@@ -249,16 +205,21 @@ def generate_disturbance_contours(
     
     # Get elements and split quads into tris
     elements = ds['SCHISM_hgrid_face_nodes'][:, :]
-    split_start = time.time()
+    t_split = time.time()
     tris = split_quads(elements)
-    print(f'Splitting quads took {time.time() - split_start:.2f} seconds')
+    print(f'Splitting quads took {time.time() - t_split:.2f} seconds')
     
     # Get triangulation for contour plot
     tri = triangulation(x, y, tris)
     
     # Get time and elevation data
     times = ds['time'][:]
-    dates = num2date(times, ds['time'].units)
+    try:
+        dates = ds.num2date(times, ds['time'].units)
+    except:
+        # Fallback to netCDF4 num2date if ds.num2date not available
+        from netCDF4 import num2date
+        dates = num2date(times, ds['time'].units)
     
     # Get elevation
     elev = ds['elevation'][:, :]
@@ -273,43 +234,46 @@ def generate_disturbance_contours(
     # Generate filenames for all time steps
     filenames = []
     
-    # For hindcast
+    # For hindcast (n-files)
     for i in range(24, 0, -1):
         filenames.append(f"{output_prefix}.t12z.disturbance.n{i:03d}.gpkg")
     
-    # For forecast
+    # For forecast (f-files)
     for i in range(96):
         filenames.append(f"{output_prefix}.t12z.disturbance.f{i+1:03d}.gpkg")
     
-    # Slice to the actual available times
+    # Slice to the actual number of times available
     filenames = filenames[:len(times)]
     
     # Add output directory path
     filenames = [os.path.join(output_dir, f) for f in filenames]
     
     # Process disturbance contours
-    disturbance_start = time.time()
+    t_disturbance = time.time()
     
     if use_multiprocessing:
-        # Set up multiprocessing pool
+        # Determine number of processes
         npool = min(len(times), mp.cpu_count() - 1)
+        if npool < 1:
+            npool = 1
+            
+        print(f"Using {npool} processes for parallel processing")
         
-        # Create argument list for parallel processing
-#        args_list = [(np.squeeze(elev[i, :]), depth, levels, fill_value, filenames[i], tri) 
-#                    for i in range(len(times))]
-        args_list = [(np.squeeze(elev[i, :]), depth, levels, fill_value, filenames[i], tri,
-                     dry_node_threshold, min_disturbance_threshold, layer_name, output_format) 
-                    for i in range(len(times))]
-
-        # Run parallel processing
-        with mp.Pool(npool) as pool:
-            pool.starmap(get_disturbance, args_list)
+        # Create and start process pool
+        pool = mp.Pool(npool)
+        args_list = [(np.squeeze(elev[i, :]), depth, levels, fill_value, filenames[i], tri) 
+                     for i in range(len(times))]
+        pool.starmap(get_disturbance, args_list)
+        
+        # Clean up
+        pool.close()
+        del pool
     else:
-        # Process sequentially
+        # Sequential processing
         for i in range(len(times)):
             get_disturbance(np.squeeze(elev[i, :]), depth, levels, fill_value, filenames[i], tri)
     
-    print(f'Calculating and masking disturbance for all times took {time.time() - disturbance_start:.2f} seconds')
+    print(f'Calculating and masking disturbance for all times took {time.time() - t_disturbance:.2f} seconds')
     print(f'Total processing time: {time.time() - t0:.2f} seconds')
     
     ds.close()
@@ -333,14 +297,7 @@ def geojson_cli():
     parser.add_argument('--max_level', type=float, default=2.0, help='Maximum contour level')
     parser.add_argument('--level_step', type=float, default=0.1, help='Contour level step')
     parser.add_argument('--single_process', action='store_true', help='Disable multiprocessing')
-    parser.add_argument('--output_format', default='GPKG', choices=['GPKG', 'GeoJSON', 'SHP'], 
-                       help='Output file format')
-    parser.add_argument('--layer_name', default='disturbance', help='Layer name in output file')
-    parser.add_argument('--dry_threshold', type=float, default=1.e-6, 
-                       help='Threshold for identifying dry nodes')
-    parser.add_argument('--min_disturbance', type=float, default=0.3, 
-                       help='Minimum disturbance threshold')
-   
+    
     args = parser.parse_args()
     
     # Generate levels from arguments
@@ -352,11 +309,7 @@ def geojson_cli():
         output_dir=args.output_dir,
         output_prefix=args.output_prefix,
         levels=levels,
-        use_multiprocessing=not args.single_process,
-        output_format=args.output_format,
-        layer_name=args.layer_name,
-        dry_node_threshold=args.dry_threshold,
-        min_disturbance_threshold=args.min_disturbance
+        use_multiprocessing=not args.single_process
     )
     
     print(f"GeoJSON files created: {len(output_files)}")
