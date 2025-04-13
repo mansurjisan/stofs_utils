@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/mansurjisan/stofs_utils/python-package.yml?branch=main)](https://github.com/mansurjisan/stofs_utils/actions/workflows/python-package.yml)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/mansurjisan/stofs_utils/python-package.yml?branch=master)](https://github.com/mansurjisan/stofs_utils/actions/workflows/python-package.yml)
 
 A Python package providing utilities for working with STOFS3D (Storm Surge and Tide Operational Forecast System) data, including grid handling, coordinate transformations, NetCDF operations, and data processing.
 
